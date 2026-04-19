@@ -153,9 +153,9 @@
     ];
 
     const BAR_CONFIG = {
-      discharge: { min: 0, max: 5000, color: '#38bdf8', label: 'Flow' },
-      gauge: { min: 0, max: 20, color: '#a78bfa', label: 'Height' },
-      precip: { min: 0, max: 0.5, color: '#4ade80', label: 'Precip' },
+      discharge: { min: 0, max: 5000, color: '#38bdf8' },
+      gauge: { min: 0, max: 20, color: '#a78bfa' },
+      precip: { min: 0, max: 0.5, color: '#4ade80' },
     };
 
     function formatNum(n) {
@@ -209,29 +209,43 @@
             </div>
           </div>
           ${timeLabel ? `<div class="updated" style="margin-top:.5rem">Updated: ${timeLabel}</div>` : ''}
-          <a class="chart-link" href="https://waterdata.usgs.gov/monitoring-location/${gauge.id}/?parameter_code=00010,00065,00060" target="_blank" rel="noopener">USGS Chart →</a>
+          <a class="chart-link" href="https://waterdata.usgs.gov/monitoring-location/${gauge.id}" target="_blank" rel="noopener">USGS Chart →</a>
         </div>
       `;
     }
 
     async function fetchGaugeData(gauge) {
-      const [dischargeRes, gaugeRes, precipRes] = await Promise.all([
-        fetch(`https://nwis.waterservices.usgs.gov/nwis/dv?format=json&timestamp=true&startDT=2026-04-17&endDT=2026-04-18&sites=${gauge.id}&parameterCd=00060`),
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const today = new Date();
+      const fmt = d => d.toISOString().split('T')[0];
+
+      const [dischargeRes, gaugeRes] = await Promise.all([
+        fetch(`https://nwis.waterservices.usgs.gov/nwis/dv?format=json&timestamp=true&startDT=${fmt(yesterday)}&endDT=${fmt(today)}&sites=${gauge.id}&parameterCd=00060`),
         fetch(`https://nwis.waterservices.usgs.gov/nwis/iv?format=json&timestamp=true&sites=${gauge.id}&parameterCd=00065`),
-        fetch(`https://nwis.waterservices.usgs.gov/nwis/dv?format=json&timestamp=true&startDT=2026-04-17&endDT=2026-04-18&sites=${gauge.id}&parameterCd=00060`),
       ]);
 
-      const [dischargeData, gaugeData, precipData] = await Promise.all([dischargeRes.json(), gaugeRes.json(), precipRes.json()]);
-      return { discharge: parseValue(dischargeData), gaugeHeight: parseValue(gaugeData), dailyPrecip: parseValue(precipData) };
+      if (!dischargeRes.ok || !gaugeRes.ok) throw new Error('API error');
+
+      const dischargeData = await dischargeRes.json();
+      const gaugeData = await gaugeRes.json();
+
+      return {
+        discharge: parseValue(dischargeData),
+        gaugeHeight: parseValue(gaugeData),
+        dailyPrecip: null,
+      };
     }
 
     function parseValue(data) {
-      if (!data || !data.valueTimeSeries || data.valueTimeSeries.length === 0) return null;
-      const vt = data.valueTimeSeries[0];
-      const v = vt.value[0];
+      if (!data) return null;
+      const vts = data.valueTimeSeries || (data.projects ? Object.values(data.projects)[0]?.valueTimeSeries : null);
+      if (!vts || vts.length === 0) return null;
+      const vt = vts[0];
+      const v = vt.value?.[0];
+      if (!v || v.value == null) return null;
       return {
         value: v.value,
-        dateTime: vt.sourceInfo?.stationName || vt.timeZoneInfo?.timeZoneCd || vt.dateTime,
         dateTime: vt.dateTime,
       };
     }
@@ -247,7 +261,7 @@
 
       container.innerHTML = results.map((r, i) => {
         if (r.status === 'fulfilled') return renderGauge(GAUGES[i], r.value);
-        return `<div class="gauge-card"><div class="gauge-name">${GAUGES[i].name}</div><div class="error">Failed to load data. <a href="https://waterdata.usgs.gov/gage-data/${GAUGES[i].id}.txt" target="_blank" rel="noopener">View on USGS →</a></div></div>`;
+        return `<div class="gauge-card"><div class="gauge-name">${GAUGES[i].name}</div><div class="error">Failed to load data. <a href="https://waterdata.usgs.gov/monitoring-location/${GAUGES[i].id}" target="_blank" rel="noopener">View on USGS →</a></div></div>`;
       }).join('');
     }
 
