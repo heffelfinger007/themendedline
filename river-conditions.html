@@ -62,10 +62,36 @@
       color: var(--muted);
       font-size: .8rem;
     }
-    .gauge-iframe {
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+      padding: 1rem 1.25rem;
+    }
+    .metric {
+      text-align: center;
+    }
+    .metric-label {
+      font-size: .7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: .25rem;
+    }
+    .metric-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .metric-unit {
+      font-size: .75rem;
+      color: var(--muted);
+      font-weight: 400;
+    }
+    .chart-img {
       width: 100%;
-      height: 320px;
-      border: none;
+      display: block;
+      border-top: 1px solid var(--border);
     }
     .gauge-footer {
       padding: .75rem 1.25rem;
@@ -95,7 +121,8 @@
       .container { padding: 1.25rem .75rem; }
       h1 { font-size: 1.4rem; }
       .gauge-header { padding: .85rem 1rem; }
-      .gauge-iframe { height: 240px; }
+      .metrics { padding: .85rem 1rem; gap: .5rem; }
+      .metric-value { font-size: 1.2rem; }
       .gauge-footer { padding: .6rem 1rem; }
     }
   </style>
@@ -115,9 +142,27 @@
       { id: '13037500', name: 'South Fork Snake River', region: 'ID @ Heise' },
     ];
 
-    function renderGauge(gauge) {
-      const chartUrl = `https://waterdata.usgs.gov/monitoring-location/${gauge.id}/#/parameter_code/00065,00060,00010/period/7`;
-      const iframeUrl = `https://waterdata.usgs.gov/nwisweb/graph?agency_cd=USGS&site_no=${gauge.id}&parm_cd=00065,00060,00010&period=7`;
+    async function fetchNumbers(gauge) {
+      try {
+        const res = await fetch(`/api/river-data?site=${gauge.id}`);
+        return await res.json();
+      } catch {
+        return null;
+      }
+    }
+
+    function formatNum(n) {
+      if (n == null) return '—';
+      return Number(n).toLocaleString('en-US', { maximumFractionDigits: 1 });
+    }
+
+    function renderGauge(gauge, data) {
+      const discharge = data?.discharge ?? null;
+      const gaugeHeight = data?.gaugeHeight ?? null;
+      const precip = data?.precip ?? null;
+
+      const chartUrl = `https://waterdata.usgs.gov/nwisweb/graph?agency_cd=USGS&site_no=${gauge.id}&parm_cd=00065,00060,00010&period=7`;
+      const fullUrl = `https://waterdata.usgs.gov/monitoring-location/${gauge.id}/#/parameter_code/00065,00060,00010/period/7`;
 
       return `
         <div class="gauge-card">
@@ -125,19 +170,46 @@
             <div class="gauge-name">${gauge.name}</div>
             <div class="gauge-region">${gauge.region}</div>
           </div>
-          <iframe class="gauge-iframe" src="${iframeUrl}" loading="lazy" referrerpolicy="no-referrer"></iframe>
+          <div class="metrics">
+            <div class="metric">
+              <div class="metric-label">Discharge</div>
+              <div class="metric-value">${formatNum(discharge)} <span class="metric-unit">CFS</span></div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">Gauge Height</div>
+              <div class="metric-value">${formatNum(gaugeHeight)} <span class="metric-unit">ft</span></div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">24hr Precip</div>
+              <div class="metric-value">${formatNum(precip)} <span class="metric-unit">in</span></div>
+            </div>
+          </div>
+          <img class="chart-img" src="${chartUrl}" alt="7-day USGS chart for ${gauge.name}" loading="lazy">
           <div class="gauge-footer">
-            <a class="chart-link" href="${chartUrl}" target="_blank" rel="noopener">Full USGS Data →</a>
+            <a class="chart-link" href="${fullUrl}" target="_blank" rel="noopener">Full USGS Data →</a>
           </div>
         </div>
       `;
     }
 
-    const container = document.getElementById('gauges');
-    const updatedEl = document.getElementById('updated');
-    const now = new Date();
-    updatedEl.textContent = `Last checked: ${now.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}`;
-    container.innerHTML = GAUGES.map(g => renderGauge(g)).join('');
+    async function init() {
+      const container = document.getElementById('gauges');
+      const updatedEl = document.getElementById('updated');
+      const now = new Date();
+      updatedEl.textContent = `Last checked: ${now.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}`;
+
+      const results = await Promise.all(GAUGES.map(async g => {
+        const data = await fetchNumbers(g);
+        return { gauge: g, data };
+      }));
+
+      container.innerHTML = results.map(({ gauge, data }) =>
+        data ? renderGauge(gauge, data) :
+        `<div class="gauge-card"><div class="gauge-header"><div class="gauge-name">${gauge.name}</div><div class="gauge-region">${gauge.region}</div></div><div class="error">Unable to load data. <a href="https://waterdata.usgs.gov/monitoring-location/${gauge.id}" target="_blank" rel="noopener">View on USGS →</a></div></div>`
+      ).join('');
+    }
+
+    init();
   </script>
 </body>
 </html>
